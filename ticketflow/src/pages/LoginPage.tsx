@@ -1,12 +1,3 @@
-// ============================================================
-// LoginPage.tsx — Atualizado para usar AuthContext
-//
-// MELHORIAS:
-//  Usa useAuth() em vez de useApp()
-//  Exibe mensagem de erro do servidor (ex: usuário inativo)
-//  Validação básica de UUID do companyId
-// ============================================================
-
 import { useState } from "react";
 import { useNavigate, Navigate } from "react-router-dom";
 import { useAuth } from "@/context/AuthContext";
@@ -16,9 +7,8 @@ import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { ThemeSwitcher } from "@/components/ThemeSwitcher";
 import { toast } from "sonner";
-import { Lock, Mail, Ticket, Building2, AlertCircle } from "lucide-react";
+import { Lock, Mail, Building2, AlertCircle } from "lucide-react";
 
-// UUID v4 regex simples
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export default function LoginPage() {
@@ -30,7 +20,6 @@ export default function LoginPage() {
   const [loading, setLoading] = useState(false);
   const [serverError, setServerError] = useState("");
 
-  // Se já está autenticado, redireciona
   if (isAuthenticated) return <Navigate to="/" replace />;
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -48,7 +37,6 @@ export default function LoginPage() {
       toast.success("Login realizado com sucesso!");
       navigate("/", { replace: true });
     } catch (err: any) {
-      // Exibe a mensagem real do servidor (ex: "Usuário inativo.", "Credenciais inválidas.")
       const msg = err?.message || "Erro ao conectar com o servidor.";
       setServerError(msg);
     } finally {
@@ -64,12 +52,28 @@ export default function LoginPage() {
 
       <div className="w-full max-w-sm space-y-6">
         <div className="text-center space-y-2">
-          <div className="mx-auto h-12 w-12 rounded-xl bg-primary/10 flex items-center justify-center">
-            <Ticket className="h-6 w-6 text-primary" />
+          {/* Ícone principal com gradiente e animação */}
+          <div
+            className="
+              mx-auto h-12 w-12 rounded-xl
+              bg-gradient-to-br from-primary/10 to-primary/20
+              flex items-center justify-center
+              animate-[float_3s_ease-in-out_infinite]
+            "
+          >
+            <Building2 className="h-6 w-6 text-primary" />
           </div>
-          <h1 className="text-2xl font-bold text-foreground">TicketFlow</h1>
-          <p className="text-sm text-muted-foreground">Sistema de Chamados</p>
+          <h1 className="text-2xl font-bold text-foreground">Desk360</h1>
+          <p className="text-sm text-muted-foreground">Tudo o que seu atendimento precisa em um só lugar!</p>
         </div>
+
+        {/* Animação keyframes */}
+        <style jsx>{`
+          @keyframes float {
+            0%, 100% { transform: translateY(0); }
+            50% { transform: translateY(-4px); }
+          }
+        `}</style>
 
         <Card>
           <CardHeader className="text-center pb-4">
@@ -78,7 +82,6 @@ export default function LoginPage() {
           </CardHeader>
           <CardContent>
             <form onSubmit={handleSubmit} className="space-y-4">
-              {/* Erro do servidor */}
               {serverError && (
                 <div className="flex items-start gap-2 p-3 rounded-md bg-destructive/10 text-destructive text-sm">
                   <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" />
@@ -121,7 +124,7 @@ export default function LoginPage() {
               </div>
 
               <div className="space-y-2">
-                <Label htmlFor="companyId">ID da Empresa</Label>
+                <Label htmlFor="companyId">Código da Empresa</Label>
                 <div className="relative">
                   <Building2 className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                   <Input
@@ -135,7 +138,7 @@ export default function LoginPage() {
                   />
                 </div>
                 <p className="text-xs text-muted-foreground">
-                  UUID da empresa cadastrada no sistema.
+                  Código informado no E-mail de boas-vindas!
                 </p>
               </div>
 
