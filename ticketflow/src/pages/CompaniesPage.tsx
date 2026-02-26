@@ -20,9 +20,10 @@ function formatDate(dateStr: string) {
 }
 
 const PLAN_OPTIONS = [
-  { value: "BASIC", label: "Basic" },
-  { value: "STANDARD", label: "Standard" },
-  { value: "PREMIUM", label: "Premium" },
+  { value: "STARTER", label: "Starter" },
+  { value: "TRIAL", label: "Trial" },
+  { value: "CORPORATE", label: "Corporate" },
+  { value: "BUSINESS", label: "Business" },
 ];
 
 const planColors: Record<string, string> = {

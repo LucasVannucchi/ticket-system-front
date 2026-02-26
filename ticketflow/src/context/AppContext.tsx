@@ -285,16 +285,24 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   // Carrega dados quando usuário logar
-  useEffect(() => {
-    if (user) {
-      setSelectedCompanyId(user.companyId);
-      loadData(user.companyId, user.role, user.id);
-    } else {
-      // Reset quando deslogar
-      setState(INITIAL_STATE);
-      setSelectedCompanyId("");
-    }
-  }, [user?.id]); // Só recarrega se o ID do usuário mudar
+    useEffect(() => {
+      if (user) {
+        setSelectedCompanyId(user.companyId);
+        loadData(user.companyId, user.role, user.id);
+      } else {
+        // Reset quando deslogar
+        setState(INITIAL_STATE);
+        setSelectedCompanyId("");
+      }
+    }, [user?.id]); // Só recarrega se o ID do usuário mudar
+
+    // 🔁 Carrega dados quando a empresa selecionada mudar (super_admin)
+    useEffect(() => {
+      if (user?.role === "super_admin" && selectedCompanyId) {
+        loadData(selectedCompanyId, user.role, user.id);
+      }
+    }, [selectedCompanyId]);
+
 
   const refreshTickets = useCallback(async () => {
     if (!user) return;
