@@ -7,8 +7,9 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { statusConfig, priorityConfig, areas } from "@/lib/mock-data";
 import { Search } from "lucide-react";
 
-export function TicketList({ filterByUser }: { filterByUser?: boolean }) {
-  const { tickets } = useApp();
+export function TicketList({ filterByUser, overrideTickets }: { filterByUser?: boolean; overrideTickets?: import("@/types/domain").Ticket[] }) {
+  const { tickets: contextTickets } = useApp();
+  const tickets = overrideTickets ?? contextTickets;
   const { user } = useAuth();
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("all");

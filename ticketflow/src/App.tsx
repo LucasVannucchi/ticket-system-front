@@ -5,6 +5,8 @@
 //  AuthProvider envolve AppProvider (dependência respeitada)
 //  ProtectedRoutes usa useAuth() em vez do AppContext
 //  Loading durante inicialização da sessão (evita flash)
+//  Rotas de recuperação de senha adicionadas
+//  Proteção de rota /forms para ROLE_USER
 // ============================================================
 
 import { Toaster } from "@/components/ui/toaster";
@@ -22,8 +24,11 @@ import NewTicketPage from "./pages/NewTicketPage";
 import TicketDetailPage from "./pages/TicketDetailPage";
 import FormsPage from "./pages/FormsPage";
 import LoginPage from "./pages/LoginPage";
+import ForgotPasswordPage from "./pages/ForgotPasswordPage";
+import ResetPasswordPage from "./pages/ResetPasswordPage";
 import UserManagementPage from "./pages/UserManagementPage";
 import CompaniesPage from "./pages/CompaniesPage";
+import ProfilePage from "./pages/ProfilePage";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient({
@@ -51,10 +56,7 @@ function GlobalLoading() {
 function ProtectedRoutes() {
   const { isAuthenticated, isInitializing } = useAuth();
 
-  // Durante verificação inicial do token, mostra loading (não redireciona)
-  // Isso evita o flash de redirect quando o token ainda está sendo validado
   if (isInitializing) return <GlobalLoading />;
-
   if (!isAuthenticated) return <Navigate to="/login" replace />;
 
   return (
@@ -66,9 +68,11 @@ function ProtectedRoutes() {
           <Route path="/tickets" element={<TicketsPage />} />
           <Route path="/tickets/new" element={<NewTicketPage />} />
           <Route path="/tickets/:id" element={<TicketDetailPage />} />
+          {/* FormsPage cuida das próprias permissões internamente */}
           <Route path="/forms" element={<FormsPage />} />
           <Route path="/users" element={<UserManagementPage />} />
           <Route path="/companies" element={<CompaniesPage />} />
+          <Route path="/profile" element={<ProfilePage />} />
           <Route path="*" element={<NotFound />} />
         </Routes>
       </AppLayout>
@@ -79,7 +83,6 @@ function ProtectedRoutes() {
 const App = () => (
   <ThemeProvider attribute="class" defaultTheme="light" enableSystem={false}>
     <QueryClientProvider client={queryClient}>
-      {/* AuthProvider fora do BrowserRouter — sem dependência de rotas */}
       <AuthProvider>
         <TooltipProvider>
           <Toaster />
@@ -87,6 +90,8 @@ const App = () => (
           <BrowserRouter>
             <Routes>
               <Route path="/login" element={<LoginPage />} />
+              <Route path="/forgot-password" element={<ForgotPasswordPage />} />
+              <Route path="/reset-password" element={<ResetPasswordPage />} />
               <Route path="/*" element={<ProtectedRoutes />} />
             </Routes>
           </BrowserRouter>

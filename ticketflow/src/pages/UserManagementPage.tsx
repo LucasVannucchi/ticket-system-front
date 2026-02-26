@@ -11,8 +11,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { toast } from "sonner";
-import { Plus, KeyRound, Users, Pencil } from "lucide-react";
-import { mapRoleToBackend, mapAreaToBackend, BackendRole, BackendArea } from "@/lib/api";
+import { Plus, KeyRound, Users, Pencil, ToggleLeft, ToggleRight, Loader2 } from "lucide-react";
+import { mapRoleToBackend, mapAreaToBackend, BackendRole, BackendArea, updateUserStatus, updateUserName, updateUserEmail, updateUserArea, addUserRole } from "@/lib/api";
 
 const POSITION_OPTIONS = [
   { value: "ASSISTANT", label: "Assistente" },
@@ -36,13 +36,14 @@ const EMPLOYMENT_OPTIONS = [
   { value: "INTERN", label: "Estagiário" },
 ];
 
+// [CORRIGIDO] Apenas as áreas mapeadas no backend (sem "Suporte")
 const AREA_OPTIONS: { value: Area; label: string }[] = [
   { value: "TI", label: "TI" },
   { value: "RH", label: "RH" },
   { value: "Financeiro", label: "Financeiro" },
-  { value: "Suporte", label: "Suporte" },
   { value: "Marketing", label: "Marketing" },
   { value: "Vendas", label: "Vendas" },
+  { value: "Operações", label: "Operações" },
   { value: "Jurídico", label: "Jurídico" },
   { value: "Compras", label: "Compras" },
 ];
@@ -62,27 +63,37 @@ const emptyForm = {
 };
 
 export default function UserManagementPage() {
-  const { users, addUser, resetUserPassword } = useApp();
+  const { users, addUser, resetUserPassword, refreshUsers } = useApp();
   const { user } = useAuth();
   const role = user?.role ?? "user";
   const [createOpen, setCreateOpen] = useState(false);
   const [resetOpen, setResetOpen] = useState<string | null>(null);
+  const [editOpen, setEditOpen] = useState<string | null>(null);
   const [newPassword, setNewPassword] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const [togglingId, setTogglingId] = useState<string | null>(null);
 
   const [form, setForm] = useState(emptyForm);
   const setField = (field: string, value: string) =>
     setForm((prev) => ({ ...prev, [field]: value }));
+
+  // Edit form state
+  const [editForm, setEditForm] = useState({ name: "", email: "", area: "TI" as Area, role: "user" as Role });
 
   const canManage = role === "admin" || role === "super_admin";
   const availableRoles: Role[] = role === "super_admin"
     ? ["user", "support", "admin", "super_admin"]
     : ["user", "support", "admin"];
 
+  // ── Criar usuário ──────────────────────────────────────────────
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!form.name || !form.email || !form.password || !form.cpf || !form.rg || !form.birthDate) {
       toast.error("Preencha todos os campos obrigatórios.");
+      return;
+    }
+    if (form.password.length < 8) {
+      toast.error("A senha deve ter pelo menos 8 caracteres.");
       return;
     }
     setSubmitting(true);
@@ -91,8 +102,8 @@ export default function UserManagementPage() {
         name: form.name,
         email: form.email,
         password: form.password,
-        cpf: form.cpf,
-        rg: form.rg,
+        cpf: form.cpf.replace(/\D/g, ""),
+        rg: form.rg.replace(/\D/g, ""),
         birthDate: form.birthDate,
         phone: form.phone.replace(/\D/g, ""),
         area: mapAreaToBackend(form.area) as BackendArea,
@@ -110,8 +121,10 @@ export default function UserManagementPage() {
     }
   };
 
+  // ── Reset de senha ─────────────────────────────────────────────
   const handleResetPassword = async (userId: string) => {
     if (!newPassword) { toast.error("Informe a nova senha."); return; }
+    if (newPassword.length < 8) { toast.error("A senha deve ter pelo menos 8 caracteres."); return; }
     setSubmitting(true);
     try {
       await resetUserPassword(userId, newPassword);
@@ -120,6 +133,49 @@ export default function UserManagementPage() {
       setResetOpen(null);
     } catch (err: any) {
       toast.error(err?.message || "Erro ao resetar senha.");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  // ── Ativar/Desativar usuário ────────────────────────────────────
+  const handleToggleStatus = async (userId: string, currentStatus: string) => {
+    const newStatus = currentStatus === "ACTIVE" ? "INACTIVE" : "ACTIVE";
+    setTogglingId(userId);
+    try {
+      await updateUserStatus(userId, newStatus);
+      await refreshUsers();
+      toast.success(`Usuário ${newStatus === "ACTIVE" ? "ativado" : "desativado"} com sucesso!`);
+    } catch (err: any) {
+      toast.error(err?.message || "Erro ao atualizar status do usuário.");
+    } finally {
+      setTogglingId(null);
+    }
+  };
+
+  // ── Editar usuário ─────────────────────────────────────────────
+  const handleEdit = async (userId: string, originalArea: Area, originalRole: Role) => {
+    if (!editForm.name.trim() && !editForm.email.trim() && editForm.area === originalArea && editForm.role === originalRole) {
+      toast.error("Nenhuma alteração detectada.");
+      return;
+    }
+    setSubmitting(true);
+    try {
+      const updates: Promise<any>[] = [];
+      if (editForm.name.trim()) updates.push(updateUserName(userId, editForm.name.trim()));
+      if (editForm.email.trim()) updates.push(updateUserEmail(userId, editForm.email.trim()));
+      if (editForm.area !== originalArea) {
+        updates.push(updateUserArea(userId, mapAreaToBackend(editForm.area)));
+      }
+      if (editForm.role !== originalRole) {
+        updates.push(addUserRole(userId, mapRoleToBackend(editForm.role) as BackendRole));
+      }
+      await Promise.all(updates);
+      await refreshUsers();
+      toast.success("Dados do usuário atualizados!");
+      setEditOpen(null);
+    } catch (err: any) {
+      toast.error(err?.message || "Erro ao editar usuário.");
     } finally {
       setSubmitting(false);
     }
@@ -141,10 +197,11 @@ export default function UserManagementPage() {
             <Users className="h-5 w-5" /> Gestão de Usuários
           </h1>
           <p className="text-sm text-muted-foreground">
-            {users.length} usuário{users.length !== 1 ? "s" : ""}
+            {users.length} usuário{users.length !== 1 ? "s" : ""} cadastrado{users.length !== 1 ? "s" : ""}
           </p>
         </div>
 
+        {/* Criar usuário */}
         <Dialog open={createOpen} onOpenChange={setCreateOpen}>
           <DialogTrigger asChild>
             <Button size="sm" className="gap-1.5">
@@ -156,22 +213,18 @@ export default function UserManagementPage() {
               <DialogTitle>Criar Usuário</DialogTitle>
             </DialogHeader>
             <form onSubmit={handleCreate} className="space-y-4">
-              {/* Nome */}
               <div className="space-y-1">
                 <Label>Nome completo *</Label>
                 <Input value={form.name} onChange={(e) => setField("name", e.target.value)} placeholder="João da Silva" />
               </div>
-              {/* Email */}
               <div className="space-y-1">
                 <Label>Email *</Label>
                 <Input type="email" value={form.email} onChange={(e) => setField("email", e.target.value)} placeholder="joao@empresa.com" />
               </div>
-              {/* Senha */}
               <div className="space-y-1">
-                <Label>Senha *</Label>
-                <Input type="password" value={form.password} onChange={(e) => setField("password", e.target.value)} placeholder="Mínimo 8 caracteres" />
+                <Label>Senha * (mínimo 8 caracteres)</Label>
+                <Input type="password" value={form.password} onChange={(e) => setField("password", e.target.value)} placeholder="••••••••" />
               </div>
-              {/* CPF / RG */}
               <div className="grid grid-cols-2 gap-3">
                 <div className="space-y-1">
                   <Label>CPF *</Label>
@@ -182,18 +235,16 @@ export default function UserManagementPage() {
                   <Input value={form.rg} onChange={(e) => setField("rg", e.target.value)} placeholder="00.000.000" />
                 </div>
               </div>
-              {/* Data nascimento / Telefone */}
               <div className="grid grid-cols-2 gap-3">
                 <div className="space-y-1">
                   <Label>Data de Nascimento *</Label>
                   <Input type="date" value={form.birthDate} onChange={(e) => setField("birthDate", e.target.value)} />
                 </div>
                 <div className="space-y-1">
-                  <Label>Telefone (11 dígitos)</Label>
-                  <Input value={form.phone} onChange={(e) => setField("phone", e.target.value)} placeholder="11999999999" maxLength={11} />
+                  <Label>Telefone</Label>
+                  <Input value={form.phone} onChange={(e) => setField("phone", e.target.value)} placeholder="11999999999" maxLength={15} />
                 </div>
               </div>
-              {/* Área / Cargo */}
               <div className="grid grid-cols-2 gap-3">
                 <div className="space-y-1">
                   <Label>Área *</Label>
@@ -218,7 +269,6 @@ export default function UserManagementPage() {
                   </Select>
                 </div>
               </div>
-              {/* Vínculo / Perfil */}
               <div className="grid grid-cols-2 gap-3">
                 <div className="space-y-1">
                   <Label>Vínculo *</Label>
@@ -245,7 +295,7 @@ export default function UserManagementPage() {
               </div>
 
               <Button type="submit" className="w-full" disabled={submitting}>
-                {submitting ? "Criando..." : "Criar Usuário"}
+                {submitting ? <><Loader2 className="h-4 w-4 animate-spin mr-2" />Criando...</> : "Criar Usuário"}
               </Button>
             </form>
           </DialogContent>
@@ -261,63 +311,161 @@ export default function UserManagementPage() {
                 <TableHead>Email</TableHead>
                 <TableHead>Perfil</TableHead>
                 <TableHead>Área</TableHead>
+                <TableHead>Status</TableHead>
                 <TableHead className="text-right">Ações</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {users.length === 0 ? (
                 <tr>
-                  <td colSpan={5} className="text-center text-muted-foreground py-8 text-sm">
+                  <td colSpan={6} className="text-center text-muted-foreground py-8 text-sm">
                     Nenhum usuário encontrado.
                   </td>
                 </tr>
               ) : (
-                users.map((user) => {
-                  const roleCfg = roleConfig[user.role];
+                users.map((u) => {
+                  const roleCfg = roleConfig[u.role] ?? roleConfig.user;
+                  const isActive = u.status !== "INACTIVE";
                   return (
-                    <TableRow key={user.id}>
-                      <TableCell className="font-medium">{user.name}</TableCell>
-                      <TableCell className="text-muted-foreground text-xs">{user.email}</TableCell>
+                    <TableRow key={u.id} className={!isActive ? "opacity-50" : ""}>
+                      <TableCell className="font-medium">{u.name}</TableCell>
+                      <TableCell className="text-muted-foreground text-xs">{u.email}</TableCell>
                       <TableCell>
                         <Badge variant="outline" className={`text-[10px] ${roleCfg.class}`}>
                           {roleCfg.label}
                         </Badge>
                       </TableCell>
-                      <TableCell className="text-xs">{user.area}</TableCell>
+                      <TableCell className="text-xs">{u.area}</TableCell>
+                      <TableCell>
+                        <span className={`text-xs font-medium ${isActive ? "text-green-600 dark:text-green-400" : "text-muted-foreground"}`}>
+                          {isActive ? "Ativo" : "Inativo"}
+                        </span>
+                      </TableCell>
                       <TableCell className="text-right">
-                        <Dialog
-                          open={resetOpen === user.id}
-                          onOpenChange={(o) => { setResetOpen(o ? user.id : null); setNewPassword(""); }}
-                        >
-                          <DialogTrigger asChild>
-                            <Button variant="ghost" size="sm" className="gap-1 h-7 text-xs">
-                              <KeyRound className="h-3 w-3" /> Senha
-                            </Button>
-                          </DialogTrigger>
-                          <DialogContent>
-                            <DialogHeader>
-                              <DialogTitle>Resetar Senha — {user.name}</DialogTitle>
-                            </DialogHeader>
-                            <div className="space-y-4">
-                              <div className="space-y-2">
-                                <Label>Nova Senha</Label>
-                                <Input
-                                  type="password"
-                                  value={newPassword}
-                                  onChange={(e) => setNewPassword(e.target.value)}
-                                  placeholder="Nova senha"
-                                />
-                              </div>
-                              <Button
-                                onClick={() => handleResetPassword(user.id)}
-                                className="w-full"
-                                disabled={submitting}
-                              >
-                                {submitting ? "Salvando..." : "Confirmar"}
+                        <div className="flex items-center justify-end gap-1">
+
+                          <Dialog
+                            open={editOpen === u.id}
+                            onOpenChange={(o) => {
+                              setEditOpen(o ? u.id : null);
+                              if (o) setEditForm({ name: u.name, email: u.email, area: u.area, role: u.role });
+                            }}
+                          >
+                            <DialogTrigger asChild>
+                              <Button variant="ghost" size="sm" className="gap-1 h-7 text-xs">
+                                <Pencil className="h-3 w-3" />
                               </Button>
-                            </div>
-                          </DialogContent>
-                        </Dialog>
+                            </DialogTrigger>
+                            <DialogContent>
+                              <DialogHeader>
+                                <DialogTitle>Editar — {u.name}</DialogTitle>
+                              </DialogHeader>
+                              <div className="space-y-4">
+                                <div className="space-y-2">
+                                  <Label>Nome</Label>
+                                  <Input
+                                    value={editForm.name}
+                                    onChange={(e) => setEditForm(f => ({ ...f, name: e.target.value }))}
+                                    placeholder="Nome completo"
+                                  />
+                                </div>
+                                <div className="space-y-2">
+                                  <Label>Email</Label>
+                                  <Input
+                                    type="email"
+                                    value={editForm.email}
+                                    onChange={(e) => setEditForm(f => ({ ...f, email: e.target.value }))}
+                                    placeholder="email@empresa.com"
+                                  />
+                                </div>
+                                <div className="grid grid-cols-2 gap-3">
+                                  <div className="space-y-2">
+                                    <Label>Área</Label>
+                                    <Select value={editForm.area} onValueChange={(v) => setEditForm(f => ({ ...f, area: v as Area }))}>
+                                      <SelectTrigger><SelectValue /></SelectTrigger>
+                                      <SelectContent>
+                                        {AREA_OPTIONS.map((a) => (
+                                          <SelectItem key={a.value} value={a.value}>{a.label}</SelectItem>
+                                        ))}
+                                      </SelectContent>
+                                    </Select>
+                                  </div>
+                                  <div className="space-y-2">
+                                    <Label>Perfil</Label>
+                                    <Select value={editForm.role} onValueChange={(v) => setEditForm(f => ({ ...f, role: v as Role }))}>
+                                      <SelectTrigger><SelectValue /></SelectTrigger>
+                                      <SelectContent>
+                                        {availableRoles.map((r) => (
+                                          <SelectItem key={r} value={r}>{roleConfig[r].label}</SelectItem>
+                                        ))}
+                                      </SelectContent>
+                                    </Select>
+                                  </div>
+                                </div>
+                                <Button
+                                  onClick={() => handleEdit(u.id, u.area, u.role)}
+                                  className="w-full"
+                                  disabled={submitting}
+                                >
+                                  {submitting ? <><Loader2 className="h-4 w-4 animate-spin mr-2" />Salvando...</> : "Salvar Alterações"}
+                                </Button>
+                              </div>
+                            </DialogContent>
+                          </Dialog>
+
+                          {/* Reset de senha */}
+                          <Dialog
+                            open={resetOpen === u.id}
+                            onOpenChange={(o) => { setResetOpen(o ? u.id : null); setNewPassword(""); }}
+                          >
+                            <DialogTrigger asChild>
+                              <Button variant="ghost" size="sm" className="gap-1 h-7 text-xs">
+                                <KeyRound className="h-3 w-3" />
+                              </Button>
+                            </DialogTrigger>
+                            <DialogContent>
+                              <DialogHeader>
+                                <DialogTitle>Resetar Senha — {u.name}</DialogTitle>
+                              </DialogHeader>
+                              <div className="space-y-4">
+                                <div className="space-y-2">
+                                  <Label>Nova Senha (mínimo 8 caracteres)</Label>
+                                  <Input
+                                    type="password"
+                                    value={newPassword}
+                                    onChange={(e) => setNewPassword(e.target.value)}
+                                    placeholder="Nova senha"
+                                  />
+                                </div>
+                                <Button
+                                  onClick={() => handleResetPassword(u.id)}
+                                  className="w-full"
+                                  disabled={submitting}
+                                >
+                                  {submitting ? <><Loader2 className="h-4 w-4 animate-spin mr-2" />Salvando...</> : "Confirmar"}
+                                </Button>
+                              </div>
+                            </DialogContent>
+                          </Dialog>
+
+                          {/* Ativar/Desativar */}
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="gap-1 h-7 text-xs"
+                            disabled={togglingId === u.id}
+                            onClick={() => handleToggleStatus(u.id, u.status || "ACTIVE")}
+                            title={isActive ? "Desativar usuário" : "Ativar usuário"}
+                          >
+                            {togglingId === u.id ? (
+                              <Loader2 className="h-3 w-3 animate-spin" />
+                            ) : isActive ? (
+                              <ToggleRight className="h-3.5 w-3.5 text-green-600 dark:text-green-400" />
+                            ) : (
+                              <ToggleLeft className="h-3.5 w-3.5" />
+                            )}
+                          </Button>
+                        </div>
                       </TableCell>
                     </TableRow>
                   );

@@ -15,6 +15,7 @@ export type {
   Status,
   Role,
   Area,
+  SlaStatus,
   Company,
   Comment,
   TicketHistory,

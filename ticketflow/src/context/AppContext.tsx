@@ -92,6 +92,8 @@ export function mapTicketSummary(t: BackendTicketSummary): Ticket {
     area: mapAreaToFrontend(t.areaType) as Area,
     companyId: "",
     formId: undefined,
+    slaStatus: t.slaStatus as import("@/types/domain").SlaStatus,
+    dueAt: t.dueAt,
   };
 }
 
@@ -112,18 +114,20 @@ export function mapTicketFull(t: BackendTicket): Ticket {
     comments: [],
     history: (t.history || []).map((h) => ({
       id: h.id,
-      action: h.action,
-      by: h.changedBy,
+      action: h.fieldChanged
+        ? `${h.fieldChanged}: ${h.oldValue ?? "-"} → ${h.newValue ?? "-"}`
+        : "atualizado",
+      by: h.changedByName,
       createdAt: h.createdAt,
     })),
     category: t.formName || "",
     area: mapAreaToFrontend(t.areaType) as Area,
     companyId: t.companyId,
     formId: t.formId,
+    slaStatus: t.slaStatus as import("@/types/domain").SlaStatus,
+    dueAt: t.dueAt,
   };
 }
-
-// ── Types ──────────────────────────────────────────────────────
 
 interface DataState {
   tickets: Ticket[];
@@ -145,6 +149,7 @@ interface AppContextType extends DataState {
 
   addCompany: (payload: api.CreateCompanyPayload) => Promise<void>;
   addForm: (form: api.CreateFormPayload) => Promise<void>;
+  updateForm: (id: string, form: api.CreateFormPayload) => Promise<void>;
   addUser: (user: api.CreateUserPayload) => Promise<void>;
 
   updateTicketStatus: (id: string, status: Status) => Promise<void>;
@@ -178,7 +183,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const setError = (error: string | null) =>
     setState((s) => ({ ...s, error }));
 
-  const loadData = useCallback(async (companyId: string, userRole: Role) => {
+  const loadData = useCallback(async (companyId: string, userRole: Role, currentUserId: string) => {
     setLoading(true);
     setError(null);
 
@@ -198,7 +203,16 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       const newState: Partial<DataState> = {};
 
       if (ticketsRes.status === "fulfilled") {
-        newState.tickets = ticketsRes.value.content.map(mapTicketSummary);
+        let ticketList = ticketsRes.value.content.map(mapTicketSummary);
+        // ROLE_SUPPORT: filtra tickets apenas da área do usuário de suporte
+        if (userRole === "support" && usersRes.status === "fulfilled") {
+          const currentUserBackend = usersRes.value.content.find(u => u.userId === currentUserId);
+          if (currentUserBackend?.area) {
+            const supportArea = api.mapAreaToFrontend(currentUserBackend.area);
+            ticketList = ticketList.filter(t => t.area === supportArea);
+          }
+        }
+        newState.tickets = ticketList;
       } else {
         // [M01] Erro não é mais silenciado
         console.error("[AppContext] Falha ao carregar tickets:", ticketsRes.reason);
@@ -208,6 +222,17 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         newState.forms = formsRes.value.map(mapForm);
       } else {
         console.error("[AppContext] Falha ao carregar formulários:", formsRes.reason);
+      }
+
+      // Para admins/support, também carrega formulários inativos para permitir reativação
+      if (isPrivileged && formsRes.status === "fulfilled") {
+        try {
+          const allForms = await api.getAllForms();
+          newState.forms = allForms.map(mapForm);
+        } catch (e) {
+          // fallback: mantém apenas os ativos
+          console.warn("[AppContext] Não foi possível carregar todos os formulários:", e);
+        }
       }
 
       if (usersRes.status === "fulfilled") {
@@ -224,17 +249,29 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         console.warn("[AppContext] Não foi possível carregar usuários atribuíveis:", e);
       }
 
-      // Company data (não crítico)
+      // Company data — for super_admin load all, for others load own company
       try {
-        const company = await api.getCompany(companyId);
-        newState.companies = [{
-          id: company.companyId,
-          name: company.nameCompany,
-          slug: company.nameCompany.toLowerCase().replace(/\s+/g, "-"),
-          planType: company.planType,
-          status: company.companyStatus,
-          createdAt: company.createdAt,
-        }];
+        if (userRole === "super_admin") {
+          const companiesPage = await api.getCompanies(0, 200);
+          newState.companies = companiesPage.content.map((company) => ({
+            id: company.companyId,
+            name: company.nameCompany,
+            slug: company.nameCompany.toLowerCase().replace(/\s+/g, "-"),
+            planType: company.planType,
+            status: company.companyStatus,
+            createdAt: company.createdAt,
+          }));
+        } else {
+          const company = await api.getCompany(companyId);
+          newState.companies = [{
+            id: company.companyId,
+            name: company.nameCompany,
+            slug: company.nameCompany.toLowerCase().replace(/\s+/g, "-"),
+            planType: company.planType,
+            status: company.companyStatus,
+            createdAt: company.createdAt,
+          }];
+        }
       } catch (e) {
         console.warn("[AppContext] Não foi possível carregar dados da empresa:", e);
       }
@@ -251,7 +288,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     if (user) {
       setSelectedCompanyId(user.companyId);
-      loadData(user.companyId, user.role);
+      loadData(user.companyId, user.role, user.id);
     } else {
       // Reset quando deslogar
       setState(INITIAL_STATE);
@@ -269,9 +306,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   }, [user]);
 
   const refreshForms = useCallback(async () => {
-    const forms = await api.getActiveForms();
+    const isPrivileged = user?.role !== "user" && user?.role !== "client";
+    const forms = isPrivileged ? await api.getAllForms() : await api.getActiveForms();
     setState((s) => ({ ...s, forms: forms.map(mapForm) }));
-  }, []);
+  }, [user]);
 
   const refreshUsers = useCallback(async () => {
     const page = await api.getUsers(0, 100);
@@ -347,6 +385,14 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     setState((s) => ({ ...s, forms: [mapForm(form), ...s.forms] }));
   }, []);
 
+  const updateForm = useCallback(async (id: string, payload: api.CreateFormPayload) => {
+    const form = await api.updateForm(id, payload);
+    setState((s) => ({
+      ...s,
+      forms: s.forms.map((f) => f.id === id ? mapForm(form) : f),
+    }));
+  }, []);
+
   const addUser = useCallback(async (payload: api.CreateUserPayload) => {
     const user = await api.createUser(payload);
     setState((s) => ({ ...s, users: [...s.users, mapUser(user)] }));
@@ -367,6 +413,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         refreshUsers,
         addCompany,
         addForm,
+        updateForm,
         addUser,
         updateTicketStatus,
         assignTicket,

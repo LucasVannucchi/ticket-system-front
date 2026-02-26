@@ -25,6 +25,7 @@ import {
   Loader2,
   Layers,
   FileText,
+  AlertCircle,
 } from "lucide-react";
 
 import * as api from "@/lib/api";
@@ -49,14 +50,25 @@ function DynamicField({
   field,
   value,
   onChange,
+  error,
 }: {
   field: FormField;
   value: string;
   onChange: (v: string) => void;
+  error?: string;
 }) {
+  const baseClass = error ? "border-destructive focus-visible:ring-destructive" : "";
+
   switch (field.type) {
     case "text":
-      return <Input value={value} onChange={(e) => onChange(e.target.value)} />;
+      return (
+        <Input
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          className={baseClass}
+          placeholder={field.required ? "Campo obrigatório" : ""}
+        />
+      );
 
     case "number":
       return (
@@ -64,6 +76,7 @@ function DynamicField({
           type="number"
           value={value}
           onChange={(e) => onChange(e.target.value)}
+          className={baseClass}
         />
       );
 
@@ -73,6 +86,8 @@ function DynamicField({
           type="email"
           value={value}
           onChange={(e) => onChange(e.target.value)}
+          className={baseClass}
+          placeholder={field.required ? "Campo obrigatório" : ""}
         />
       );
 
@@ -82,6 +97,8 @@ function DynamicField({
           value={value}
           onChange={(e) => onChange(e.target.value)}
           rows={4}
+          className={`resize-none ${baseClass}`}
+          placeholder={field.required ? "Campo obrigatório" : ""}
         />
       );
 
@@ -91,6 +108,7 @@ function DynamicField({
           type="date"
           value={value}
           onChange={(e) => onChange(e.target.value)}
+          className={baseClass}
         />
       );
 
@@ -100,9 +118,8 @@ function DynamicField({
           <input
             type="checkbox"
             checked={value === "true"}
-            onChange={(e) =>
-              onChange(e.target.checked ? "true" : "false")
-            }
+            onChange={(e) => onChange(e.target.checked ? "true" : "false")}
+            className="h-4 w-4 rounded border-border"
           />
           <span className="text-sm">{field.label}</span>
         </div>
@@ -111,7 +128,7 @@ function DynamicField({
     case "dropdown":
       return (
         <Select value={value} onValueChange={onChange}>
-          <SelectTrigger>
+          <SelectTrigger className={baseClass}>
             <SelectValue placeholder="Selecione..." />
           </SelectTrigger>
           <SelectContent>
@@ -125,7 +142,13 @@ function DynamicField({
       );
 
     default:
-      return <Input value={value} onChange={(e) => onChange(e.target.value)} />;
+      return (
+        <Input
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          className={baseClass}
+        />
+      );
   }
 }
 
@@ -141,11 +164,13 @@ export function TicketForm() {
   const [selectedArea, setSelectedArea] = useState<Area | "">("");
   const [selectedForm, setSelectedForm] = useState<CustomForm | null>(null);
   const [title, setTitle] = useState("");
+  const [titleError, setTitleError] = useState("");
   const [priority, setPriority] = useState<Priority>("medium");
   const [fieldValues, setFieldValues] = useState<Record<string, string>>({});
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [submitting, setSubmitting] = useState(false);
 
-  /* ------------------ Load Forms (Backend Driven) ------------------ */
+  /* ------------------ Load Forms (Backend) ------------------ */
 
   useEffect(() => {
     async function loadForms() {
@@ -169,7 +194,7 @@ export function TicketForm() {
               label: field.label,
               required: field.required,
               fieldOrder: field.fieldOrder,
-              type: mapFieldTypeToFrontend(field.fieldType) as any,
+              type: mapFieldTypeToFrontend(field.fieldType) as FormField["type"],
               options: field.options
                 ? field.options.split(",").map((o) => o.trim())
                 : undefined,
@@ -203,16 +228,51 @@ export function TicketForm() {
         initial[f.id] = "";
       });
       setFieldValues(initial);
+      setFieldErrors({});
     }
   }, [selectedForm]);
+
+  /* ------------------ Validation ------------------ */
+
+  const validateStep3 = (): boolean => {
+    const errors: Record<string, string> = {};
+    let valid = true;
+
+    if (!title.trim()) {
+      setTitleError("O título é obrigatório.");
+      valid = false;
+    } else {
+      setTitleError("");
+    }
+
+    if (selectedForm) {
+      selectedForm.fields.forEach((field) => {
+        if (field.required) {
+          const val = fieldValues[field.id] ?? "";
+          if (!val.trim() || val === "false") {
+            errors[field.id] = `"${field.label}" é obrigatório.`;
+            valid = false;
+          }
+        }
+      });
+    }
+
+    setFieldErrors(errors);
+    return valid;
+  };
 
   /* ------------------ Submit ------------------ */
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    if (!title.trim() || !selectedArea || !selectedForm) {
-      toast.error("Preencha todos os campos obrigatórios.");
+    if (!validateStep3()) {
+      toast.error("Preencha todos os campos obrigatórios antes de enviar.");
+      return;
+    }
+
+    if (!selectedArea || !selectedForm) {
+      toast.error("Selecione uma área e um formulário.");
       return;
     }
 
@@ -225,7 +285,7 @@ export function TicketForm() {
         fieldOrder: idx,
       }));
 
-      await api.createTicket({
+      const created = await api.createTicket({
         formId: selectedForm.id,
         title,
         areaType: mapAreaToBackend(selectedArea as Area),
@@ -233,11 +293,7 @@ export function TicketForm() {
         formData,
       });
 
-      navigate("/tickets");
-
-      // 🔥 força recarregar a aplicação inteira
-      window.location.reload();
-
+      toast.success("Ticket criado com sucesso!");
       setStep(4);
     } catch (err: any) {
       toast.error(err?.message || "Erro ao criar ticket.");
@@ -262,25 +318,37 @@ export function TicketForm() {
     return (
       <Card className="max-w-md mx-auto text-center p-8">
         <CheckCircle className="h-10 w-10 mx-auto text-green-500 mb-4" />
-        <h2 className="text-xl font-semibold mb-2">
-          Ticket criado com sucesso!
-        </h2>
-        <Button onClick={() => navigate("/tickets")}>
-          Ver Tickets
-        </Button>
+        <h2 className="text-xl font-semibold mb-2">Ticket criado com sucesso!</h2>
+        <p className="text-sm text-muted-foreground mb-6">
+          Seu chamado foi aberto. Você pode acompanhar o andamento na lista de tickets.
+        </p>
+        <Button onClick={() => navigate("/")}>Ver Tickets</Button>
       </Card>
     );
   }
 
-  /* ------------------ STEP 1 ------------------ */
+  /* ------------------ STEP 1: Selecionar Área ------------------ */
 
   if (step === 1) {
+    if (availableAreas.length === 0) {
+      return (
+        <Card className="max-w-xl mx-auto">
+          <CardHeader>
+            <CardTitle>Nova Solicitação</CardTitle>
+            <CardDescription>
+              Nenhum formulário ativo encontrado. Entre em contato com o suporte.
+            </CardDescription>
+          </CardHeader>
+        </Card>
+      );
+    }
+
     return (
       <Card className="max-w-xl mx-auto">
         <CardHeader>
           <CardTitle>Nova Solicitação</CardTitle>
           <CardDescription>
-            Selecione a área
+            Selecione a área responsável pela sua solicitação
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-3">
@@ -303,13 +371,14 @@ export function TicketForm() {
     );
   }
 
-  /* ------------------ STEP 2 ------------------ */
+  /* ------------------ STEP 2: Selecionar Formulário ------------------ */
 
   if (step === 2) {
     return (
       <Card className="max-w-xl mx-auto">
         <CardHeader>
-          <CardTitle>Selecione o Formulário</CardTitle>
+          <CardTitle>Selecione o Tipo de Solicitação</CardTitle>
+          <CardDescription>Área: {selectedArea}</CardDescription>
         </CardHeader>
         <CardContent className="space-y-3">
           {areaForms.map((form) => (
@@ -323,7 +392,12 @@ export function TicketForm() {
               }}
             >
               <FileText className="h-4 w-4 mr-2" />
-              {form.name}
+              <div className="text-left">
+                <div>{form.name}</div>
+                {form.description && (
+                  <div className="text-xs text-muted-foreground font-normal">{form.description}</div>
+                )}
+              </div>
             </Button>
           ))}
 
@@ -336,23 +410,42 @@ export function TicketForm() {
     );
   }
 
-  /* ------------------ STEP 3 ------------------ */
+  /* ------------------ STEP 3: Preencher Formulário ------------------ */
 
   return (
     <Card className="max-w-2xl mx-auto">
       <CardHeader>
         <CardTitle>{selectedForm?.name}</CardTitle>
-        <CardDescription>Área: {selectedArea}</CardDescription>
+        <CardDescription>
+          Área: {selectedArea} · Preencha todos os campos obrigatórios (*)
+        </CardDescription>
       </CardHeader>
 
       <CardContent>
         <form onSubmit={handleSubmit} className="space-y-6">
-          <div>
-            <Label>Título *</Label>
-            <Input value={title} onChange={(e) => setTitle(e.target.value)} />
+          {/* Título */}
+          <div className="space-y-1.5">
+            <Label className="flex items-center gap-1">
+              Título <span className="text-destructive">*</span>
+            </Label>
+            <Input
+              value={title}
+              onChange={(e) => {
+                setTitle(e.target.value);
+                if (e.target.value.trim()) setTitleError("");
+              }}
+              placeholder="Descreva brevemente sua solicitação"
+              className={titleError ? "border-destructive focus-visible:ring-destructive" : ""}
+            />
+            {titleError && (
+              <p className="text-xs text-destructive flex items-center gap-1">
+                <AlertCircle className="h-3 w-3" /> {titleError}
+              </p>
+            )}
           </div>
 
-          <div>
+          {/* Prioridade */}
+          <div className="space-y-1.5">
             <Label>Prioridade</Label>
             <Select
               value={priority}
@@ -370,34 +463,60 @@ export function TicketForm() {
             </Select>
           </div>
 
+          {/* Campos dinâmicos do formulário */}
           {selectedForm?.fields.map((field) => (
-            <div key={field.id}>
-              <Label>{field.label}</Label>
+            <div key={field.id} className="space-y-1.5">
+              <Label className="flex items-center gap-1">
+                {field.label}
+                {field.required && <span className="text-destructive">*</span>}
+              </Label>
               <DynamicField
                 field={field}
-                value={fieldValues[field.id]}
-                onChange={(v) =>
-                  setFieldValues((prev) => ({
-                    ...prev,
-                    [field.id]: v,
-                  }))
-                }
+                value={fieldValues[field.id] ?? ""}
+                onChange={(v) => {
+                  setFieldValues((prev) => ({ ...prev, [field.id]: v }));
+                  if (v.trim()) {
+                    setFieldErrors((prev) => {
+                      const next = { ...prev };
+                      delete next[field.id];
+                      return next;
+                    });
+                  }
+                }}
+                error={fieldErrors[field.id]}
               />
+              {fieldErrors[field.id] && (
+                <p className="text-xs text-destructive flex items-center gap-1">
+                  <AlertCircle className="h-3 w-3" /> {fieldErrors[field.id]}
+                </p>
+              )}
             </div>
           ))}
 
-          <div className="flex justify-between pt-4">
+          {/* Aviso de campos obrigatórios */}
+          {Object.keys(fieldErrors).length > 0 && (
+            <div className="rounded-md bg-destructive/10 border border-destructive/20 p-3 text-sm text-destructive flex items-start gap-2">
+              <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" />
+              <span>Existem campos obrigatórios não preenchidos. Revise os erros acima.</span>
+            </div>
+          )}
+
+          <div className="flex justify-between pt-2">
             <Button
               type="button"
               variant="outline"
               onClick={() => setStep(2)}
             >
+              <ArrowLeft className="h-4 w-4 mr-2" />
               Voltar
             </Button>
 
             <Button type="submit" disabled={submitting}>
               {submitting ? (
-                <Loader2 className="h-4 w-4 animate-spin" />
+                <>
+                  <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                  Enviando...
+                </>
               ) : (
                 "Criar Ticket"
               )}
